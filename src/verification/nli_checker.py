@@ -163,3 +163,101 @@ def check_claim_entailment(claim_text: str, evidence_chunks: list[dict]) -> Veri
         confidence=float(np.max(neutral_probs)),
         supporting_chunk_id=None,
     )
+
+
+def verify_claim_nli(claim_text: str, evidence_chunks: list[dict]):
+    """Full-featured NLI verification returning an AggregatedClaimResult.
+
+    Decomposes evidence into individual sentences, scores each against
+    claim_text via cross-encoder, and aggregates according to VeriAI policy.
+    """
+    from src.verification.aggregation import EvidencePassageScore, aggregate_evidence
+
+    if not evidence_chunks:
+        from src.verification.aggregation import AggregatedClaimResult, ClaimVerdict
+
+        return AggregatedClaimResult(
+            claim_text=claim_text,
+            verdict=ClaimVerdict.INSUFFICIENT_EVIDENCE,
+            model_score=0.0,
+            retrieval_similarity=0.0,
+            verification_method="nli",
+            model_identifier="cross-encoder/nli-deberta-v3-base",
+            plain_english_explanation="No evidence passages provided.",
+            requires_human_review=True,
+            limitations=["Empty evidence set."],
+        )
+
+    sentence_records = []
+    for chunk in evidence_chunks:
+        for sentence in split_into_sentences(chunk["text"]):
+            sentence_records.append(
+                {
+                    "sentence": sentence,
+                    "chunk_id": chunk.get("chunk_id", "c0"),
+                    "doc_id": chunk.get("doc_id", "doc"),
+                    "page_number": chunk.get("page_number"),
+                    "similarity": float(chunk.get("distance", 0.0)),
+                }
+            )
+
+    if not sentence_records:
+        from src.verification.aggregation import AggregatedClaimResult, ClaimVerdict
+
+        return AggregatedClaimResult(
+            claim_text=claim_text,
+            verdict=ClaimVerdict.INSUFFICIENT_EVIDENCE,
+            model_score=0.0,
+            retrieval_similarity=0.0,
+            verification_method="nli",
+            model_identifier="cross-encoder/nli-deberta-v3-base",
+            plain_english_explanation="No parsable sentences in evidence chunks.",
+        )
+
+    cfg = get_config()["verification"]
+    model = _get_nli_model()
+    label_to_index = {label.lower(): int(idx) for idx, label in model.config.id2label.items()}
+
+    pairs = [(rec["sentence"], claim_text) for rec in sentence_records]
+    raw_logits = model.predict(pairs)
+    probs = np.array([_softmax(row) for row in raw_logits])
+
+    entail_thresh = cfg.get("entailment_threshold", 0.5)
+    contra_thresh = cfg.get("contradiction_threshold", 0.5)
+
+    passage_scores = []
+    for i, rec in enumerate(sentence_records):
+        ep = float(probs[i, label_to_index["entailment"]])
+        cp = float(probs[i, label_to_index["contradiction"]])
+        np_prob = float(probs[i, label_to_index["neutral"]])
+
+        if ep >= entail_thresh:
+            v = "entailment"
+        elif cp >= contra_thresh:
+            v = "contradiction"
+        else:
+            v = "neutral"
+
+        passage_scores.append(
+            EvidencePassageScore(
+                chunk_id=rec["chunk_id"],
+                doc_id=rec["doc_id"],
+                text=rec["sentence"],
+                page_number=rec["page_number"],
+                retrieval_similarity=rec["similarity"],
+                entailment_prob=ep,
+                contradiction_prob=cp,
+                neutral_prob=np_prob,
+                verdict=v,
+            )
+        )
+
+    return aggregate_evidence(
+        claim_text=claim_text,
+        passage_scores=passage_scores,
+        entailment_threshold=entail_thresh,
+        contradiction_threshold=contra_thresh,
+        method="nli",
+        model_name="cross-encoder/nli-deberta-v3-base",
+    )
+

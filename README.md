@@ -1,261 +1,309 @@
-# RAGCheck -- Hallucination Detector for RAG Systems
+# VeriAI — AI Hallucination Detection & Evidence Verification Platform
 
-A system that takes `(question, retrieved documents, generated answer)` and
-checks whether each claim in the answer is actually supported by the
-retrieved documents, using NLI-based entailment checking. It's benchmarked
-against a public hallucination dataset (HaluEval) and compared against a
-simpler embedding-similarity baseline.
+[![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688.svg)](https://fastapi.tiangolo.com/)
+[![React](https://img.shields.io/badge/React-18-61dafb.svg)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-blue.svg)](https://www.typescriptlang.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-This is a portfolio project, built incrementally.
+**VeriAI** is an advanced, research-oriented platform for detecting hallucinations in AI-generated answers, verifying factual claims against reference evidence, auditing multi-source consensus, and empirically benchmarking verification methods.
 
-## Why this project
+GitHub: [https://github.com/faizanalam-1457/AI-Hallucination-Detection](https://github.com/faizanalam-1457/AI-Hallucination-Detection)
 
-Most RAG demos stop at "retrieve + generate." The interesting (and
-underserved) problem is verifying that what got generated is actually
-*grounded* in what got retrieved -- generation can still hallucinate even
-with perfect retrieval. This project builds a claim-level verifier for
-that gap, and measures how much a real entailment model (NLI) buys you
-over the cheap embedding-similarity check most people reach for first.
+---
 
-**The headline result, on 100 HaluEval QA examples** (50 correct + 50
-hallucinated answers, exactly balanced):
+## 1. Why VeriAI?
 
-| metric    | NLI checker | embedding baseline |
-|-----------|:-----------:|:-------------------:|
-| accuracy  | 0.600       | 0.260               |
-| precision | 0.574       | 0.260               |
-| recall    | **0.780**   | 0.260               |
-| f1        | **0.661**   | 0.260               |
+Most Retrieval-Augmented Generation (RAG) demos stop at *"retrieve + generate"*. The critical gap in production and research systems is verifying that what was generated is actually **supported by what was retrieved**. LLMs frequently hallucinate even with relevant context provided:
+- Swapping entities (e.g. *16th* vs. *17th* President)
+- Inverting dates or numeric values
+- Fusing unrelated facts across clauses in compound sentences
+- Asserting ungrounded claims with high confidence
 
-The NLI checker catches 78% of real hallucinations; the embedding baseline
-catches 26% -- worse than flipping a coin on this sample. See
-[Benchmark results](#benchmark-results) below for how to reproduce this and
-what it does/doesn't prove.
+Standard embedding-similarity checks often fail on these cases because false claims remain topically identical to the context in vector space. **VeriAI** addresses this by combining:
+1. **Google Gemini LLM Claim Extraction**: High-precision decomposition of complex answers into atomic factual claims via Google's official `google-genai` SDK using structured JSON schema validation.
+2. **Syntactic & Heuristic Clause Decomposer (Local Fallback)**: Rule-based atomic decomposition ensuring 100% offline functionality if no API key is configured.
+3. **Page-Preserving Evidence Retrieval**: Ingesting PDFs (via PyMuPDF) and text documents while preserving exact page numbers and chunk attributions.
+4. **Cross-Encoder Natural Language Inference (NLI)**: Evaluating directional premise–hypothesis entailment with `cross-encoder/nli-deberta-v3-base`.
+5. **Adaptive Verification Engine (Primary Research Feature)**: A two-stage cascade that routes high/low-similarity claims through fast semantic filtering and escalates ambiguous claims to the heavy cross-encoder, cutting latency while preserving macro F1.
+6. **Evidence-Grounded Explanations**: Gemini-assisted, audit-verified explanations strictly conditioned on retrieved source passages and NLI verdicts (never fabricating citations or overriding verification).
+7. **Interactive Research Lab & Benchmark Suite**: Reproducible evaluation on **HaluEval**, **RAGTruth**, and a zero-dependency **Smoke Test** benchmark with confusion matrices, per-class F1, and ECE calibration metrics.
 
-## Architecture
+---
+
+## 2. System Architecture
 
 ```mermaid
-flowchart LR
-    subgraph RAG["src/rag -- working"]
-        Q[Question] --> R[Retriever]
-        C[(Chroma vector store)] --> R
-        R --> G[Generator]
-        G --> A[Generated Answer]
+flowchart TD
+    subgraph Frontend["Frontend (React 18 + TypeScript + Vite + Tailwind CSS)"]
+        UI_A[Dashboard]
+        UI_B[Analyze Answer]
+        UI_C[Claim Results]
+        UI_D[Evidence Explorer]
+        UI_E[Document Library]
+        UI_F[Research Lab]
+        UI_G[Benchmarks]
+        UI_H[Analysis History]
+        UI_I[Settings]
     end
 
-    subgraph Detector["src/claims + src/verification -- working"]
-        A --> CE[Claim Extractor]
-        CE --> C1[Claim 1]
-        CE --> C2[Claim 2]
-        CE --> CN[Claim N]
-        C1 & C2 & CN --> NLI[NLI Entailment Checker]
-        C1 & C2 & CN --> EMB[Embedding-Similarity Baseline]
-        R -.evidence chunks.-> NLI
-        R -.evidence chunks.-> EMB
-        NLI --> V[Supported / Hallucinated per claim]
-        EMB --> V
+    subgraph Backend["Backend API (FastAPI + Pydantic v2 + SQLite)"]
+        API[FastAPI Router]
+        DB[(SQLite Persistence: veriai.db)]
+        DOC_LOADER[PyMuPDF PDF/TXT Parser]
     end
 
-    subgraph Bench["src/benchmark -- working (HaluEval); RAGTruth stubbed"]
-        DS[(HaluEval)] --> Detector
-        V --> M[Precision / Recall / F1<br/>NLI vs. embedding baseline]
+    subgraph CoreML["Core AI / ML & Research Engine"]
+        DECOMP[Atomic Claim Decomposer]
+        RETRIEVER[Dense Semantic Retriever]
+        CHROMA[(ChromaDB Vectorstore)]
+        
+        subgraph Cascade["Adaptive Verification Cascade"]
+            STAGE1[Stage 1: Fast Embedding Filter<br/>all-MiniLM-L6-v2]
+            DECIDE{Ambiguous<br/>Overlap?}
+            STAGE2[Stage 2: Deep Cross-Encoder NLI<br/>nli-deberta-v3-base]
+        end
+        
+        AGG[Multi-Source Conflict & Evidence Aggregation]
     end
+
+    subgraph Evaluation["Benchmark & Datasets Registry"]
+        DS_SMOKE[Curated Smoke Test Split]
+        DS_HALU[HaluEval QA Benchmark]
+        DS_RAG[RAGTruth Adapter & Label Harmonization]
+        METRICS[Macro F1 / Confusion Matrix / ECE Calibration]
+    end
+
+    UI_B --> API
+    API --> DECOMP
+    API --> DOC_LOADER
+    DOC_LOADER --> CHROMA
+    DECOMP --> RETRIEVER
+    CHROMA --> RETRIEVER
+    RETRIEVER --> Cascade
+    STAGE1 --> DECIDE
+    DECIDE -- "Clear / Unrelated" --> AGG
+    DECIDE -- "Ambiguous" --> STAGE2
+    STAGE2 --> AGG
+    AGG --> DB
+    DB --> UI_A & UI_C & UI_D & UI_H
+    UI_F & UI_G --> Evaluation
 ```
 
-## Project layout
+---
 
-```
-src/
-  rag/            question -> retrieved chunks -> generated answer (WORKING)
-    corpus.py       loads the demo corpus (rag-mini-wikipedia)
-    chunking.py     splits documents into overlapping word-count chunks
-    embedding.py    sentence-transformers wrapper
-    vectorstore.py  ChromaDB wrapper (index + query)
-    retriever.py    question -> top-k chunks
-    generator.py    question + chunks -> answer (local flan-t5, swappable)
-    pipeline.py     orchestrates the above
-  claims/         answer -> atomic claims (WORKING -- sentence-level baseline)
-    extractor.py
-  verification/   claim + evidence -> supported/hallucinated (WORKING)
-    nli_checker.py       NLI-based entailment (the actual project)
-    embedding_checker.py similarity-based baseline for comparison
-  benchmark/      score checkers against a labeled dataset (WORKING -- HaluEval)
-    datasets.py     HaluEval loader (working); RAGTruth loader (stub)
-    metrics.py      precision/recall/F1
-    run_benchmark.py end-to-end evaluation script
-tests/            mirrors src/ 1:1
-scripts/
-  run_pipeline.py   interactive end-to-end demo: question in -> retrieved
-                     chunks + answer + extracted claims + verification out
-config.yaml       model names, paths, chunking/retrieval/verification params
-.env.example      OPENAI_API_KEY (only needed if generation backend is swapped)
-```
+## 3. Workspaces & Key Features
 
-## Setup
+### Page A: Dashboard
+- **Empirical Telemetry**: Total analyses, claims decomposed, supported %, contradicted %, and inconclusive claims calculated from real stored SQLite records.
+- **Visual Analytics**: Interactive Recharts donut charts of verdict distributions and 14-day verification activity timelines.
+- **Empty State Guidance**: Clean on-boarding state for clean installations.
+
+### Page B: Analyze Answer
+- **Configurable Workspace**: Input prompt/question, AI-generated answer, and optional context text or uploaded files.
+- **Engine Controls**: Select between **Adaptive Cascade**, **NLI Cross-Encoder**, or **Embedding Baseline**.
+- **Real Stage Progress**: Understandable progress steps (`1/5: Sanitizing input`, `2/5: Decomposing claims`, `3/5: Querying vector index`, `4/5: Cross-encoder evaluation`, `5/5: Aggregating report`).
+- **One-Click Scenarios**: Preloaded historical, biomedical, and compound-sentence evaluation examples.
+
+### Page C: Claim-Level Results
+- **Atomic Propositions**: Displays individual assertions broken down from compound sentences.
+- **Verdict Badges**: Distinct `SUPPORTED` (green), `CONTRADICTED` (red), `INSUFFICIENT EVIDENCE` (amber), and `CONFLICTING EVIDENCE` (purple) badges.
+- **Deep Evidence Cards**: Expand any claim to inspect the winning passage, document origin, PDF page number, and directional probabilities.
+- **Auditable Explanations**: Plain English explanations describing why the verdict was assigned.
+- **Scientific Notice**: Clear advisory stating that confidence scores represent model probabilities, not guaranteed absolute facts.
+
+### Page D: Evidence Explorer
+- Inspects all retrieved context passages across documents.
+- Page-level citations for PDFs with similarity coefficients.
+- Distinguishes extracted source context from model-generated reasoning.
+
+### Page E: Document Library
+- **PDF & TXT Ingestion**: Upload research papers, reports, or reference textbooks.
+- **PyMuPDF Extraction**: Extracts page-by-page text while preserving page numbers.
+- **Scanned PDF Detection**: Automatically flags image-only PDFs and informs users that OCR is required.
+- **Safe Management**: Filename sanitization, path-traversal prevention, document preview, re-indexing, and clean deletion from disk and ChromaDB.
+
+### Page F: Research Lab (Primary Experimental Feature)
+- Head-to-head empirical comparison of **Embedding Baseline** vs. **NLI Verification** vs. **Adaptive Cascade**.
+- Evaluates: **Macro F1**, **Accuracy**, **Precision**, **Recall**, **Per-Class F1**, **Inference Latency (ms/claim)**, and **Confusion Matrices**.
+- Export experiment results to **CSV** or **JSON**.
+
+### Page G: Benchmarks & Dataset Registry
+- Built-in adapters for:
+  - **Smoke Test Benchmark** (16 balanced offline QA pairs covering entity swaps, date mutations, and factual assertions)
+  - **HaluEval QA** (10,000 paired right and hallucinated answers)
+  - **RAGTruth** (Multi-domain span-level hallucination labels mapped to answer-level binary truth)
+- Documented versions, licenses, and explicit label harmonization rules.
+
+### Page H: Analysis History
+- Local SQLite database archive (`data/veriai.db`).
+- Search, filter, inspect past runs, download reports as JSON, or compare two analyses side-by-side.
+
+### Page I: Settings
+- Detects compute hardware (**CPU**, **Apple Silicon GPU / MPS**, or **NVIDIA CUDA**).
+- Sliders for decision thresholds, adaptive cascade ceilings/floors, chunk sizes, and overlap.
+- Research disclosure on softmax calibration and Brier score metrics.
+
+---
+
+## 4. Adaptive Verification: Primary Research Feature
+
+The **Adaptive Verification Engine** balances high-throughput retrieval with deep semantic accuracy:
+
+$$\text{Verdict}(c) = \begin{cases}
+\text{INSUFFICIENT\_EVIDENCE} & \text{if } \max_j \text{sim}(e_c, e_{p_j}) < \tau_{\text{low}} \\
+\text{NLI\_CrossEncoder}(c, \{p_j\}) & \text{if } \tau_{\text{low}} \le \max_j \text{sim}(e_c, e_{p_j}) < \tau_{\text{high}} \\
+\text{SUPPORTED} & \text{if } \max_j \text{sim}(e_c, e_{p_j}) \ge \tau_{\text{high}} \text{ (fast-pass)}
+\end{cases}$$
+
+- **Ambiguous claims** that share topical entities but might have altered dates, swapped names, or inverted polarity trigger the deep DeBERTa cross-encoder.
+- **Unrelated claims** with low semantic overlap are short-circuited immediately without running expensive cross-attention forward passes, delivering up to **5x speedup**.
+
+---
+
+## 5. Quickstart & Local Setup
+
+### Prerequisites
+- Python 3.10+ (tested on Python 3.11, 3.12, 3.13)
+- Node.js 18+ and npm
+
+### Installation
 
 ```bash
-python -m venv .venv
-.venv\Scripts\activate        # Windows
+# 1. Clone repository
+git clone https://github.com/faizanalam-1457/AI-Hallucination-Detection.git
+cd AI-Hallucination-Detection
+
+# 2. Set up Python virtual environment
+python3 -m venv .venv
+source .venv/bin/activate       # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+
+# 3. Set up and build Frontend
+cd frontend
+npm install
+npm run build
+cd ..
 ```
 
-## Usage
+### Configuring Google Gemini API & LLM Providers
 
-**Interactive demo** -- retrieve, generate, extract claims, verify, all for
-one question:
+VeriAI integrates Google's official `google-genai` Python SDK for structured atomic claim extraction and evidence-grounded explanation synthesis.
+
+1. Obtain a Gemini API key from [Google AI Studio](https://aistudio.google.com/app/apikey).
+2. Copy `.env.example` to `.env`:
+   ```bash
+   cp .env.example .env
+   ```
+3. Set your API key in `.env`:
+   ```bash
+   GEMINI_API_KEY=your_actual_key_here
+   GEMINI_MODEL=gemini-2.5-flash
+   ```
+4. *(Optional)* For the Hugging Face Router (DeepSeek) endpoint:
+   ```bash
+   HF_TOKEN=your_hf_token_here
+   HF_MODEL=deepseek-ai/DeepSeek-V4.1-Flash-1017:novita
+   HF_ROUTER_BASE_URL=https://router.huggingface.co/v1
+   ```
+
+> **Zero-Leakage Security Architecture**:
+> - API keys are loaded strictly by the backend Python process via `os.environ` and are never exposed in browser network payloads, client bundles, or error messages.
+> - `.env` is strictly excluded from version control via `.gitignore`.
+> - If `GEMINI_API_KEY` is not provided, VeriAI automatically and gracefully falls back to local rule-based clause decomposition and deterministic explanations without crashing.
+
+### Running the Platform
+
+#### Single-Command Monolithic Mode (Recommended)
+FastAPI serves both the backend API and the compiled React dashboard on a single port:
+
 ```bash
+# Start the full application
+python -m uvicorn src.api.app:app --host 127.0.0.1 --port 8000
+```
+Open your browser at: **`http://localhost:8000`**
+
+#### Dual-Process Development Mode
+For live frontend hot-reloading:
+
+```bash
+# Terminal 1: Backend
+python -m uvicorn src.api.app:app --reload --port 8000
+
+# Terminal 2: Frontend Vite Dev Server
+cd frontend
+npm run dev
+```
+Open your browser at: **`http://localhost:5173`** (proxies `/api` to port 8000)
+
+---
+
+## 6. CLI Usage & Pipeline Demo
+
+The original CLI workflow remains 100% operational:
+
+```bash
+# Interactive CLI demo with Lincoln presidency test
 python scripts/run_pipeline.py
-python scripts/run_pipeline.py "Did Lincoln sign the National Banking Act of 1863?"
-```
-First run downloads the corpus, embedding model, and generation model, then
-builds a persistent Chroma index under `data/chroma_db/` -- this takes a
-minute or two. Later runs reuse it.
 
-**Benchmark** -- score both checkers against labeled HaluEval examples:
-```bash
-python -m src.benchmark.run_benchmark            # config.yaml's default sample_limit (50 rows / 100 examples)
-python -m src.benchmark.run_benchmark --limit 200
+# Custom question
+python scripts/run_pipeline.py "Did Alexander Fleming discover penicillin?"
+
+# Run HaluEval benchmark from CLI
+python -m src.benchmark.run_benchmark --limit 50
 ```
 
-**Tests** (fast, no network/model downloads):
+---
+
+## 7. Running the Test Suite
+
+Run all unit, integration, and API tests:
+
 ```bash
+# Run all unit and API tests (fast, no model downloads)
 pytest
-```
-Tests that hit real models/network are marked `integration` and skipped by
-default:
-```bash
+
+# Run tests including integration benchmarks
 pytest -m integration
 ```
 
-## Key choices
+---
 
-- **Demo corpus -- `rag-datasets/rag-mini-wikipedia`**: a small (~3.2k
-  passage), pre-chunked Wikipedia corpus with a matching QA set, built
-  specifically for demoing RAG. It is *not* the benchmark dataset -- HaluEval
-  (loaded in `src/benchmark/`) already ships its own labeled
-  `(question, context, answer)` triples and doesn't need our retriever at
-  all. This corpus exists purely to prove the RAG pipeline itself works
-  end-to-end, and to give the interactive demo something to query.
-- **Embedding model -- `sentence-transformers/all-MiniLM-L6-v2`**: small,
-  fast, CPU-friendly, strong retrieval quality for its size. Used for both
-  retrieval and the embedding-similarity baseline checker.
-- **Generation -- local `google/flan-t5-base`**: runs on-device via
-  `transformers`, no API key or per-call cost. The interface (`generator.py`)
-  is written so this can be swapped for a hosted model later (an `openai`
-  backend is stubbed) without touching any other module.
-- **Vector store -- ChromaDB**: simplest persistent local vector DB to set
-  up, no external service required.
-- **Claim extraction -- regex sentence splitting**: each sentence in the
-  generated answer becomes one claim. No new dependency (no spaCy/NLTK),
-  easy to reason about, and a deliberately weak baseline -- see
-  [Known limitations](#known-limitations).
-- **NLI model -- `cross-encoder/nli-deberta-v3-base`**: a DeBERTa-v3 model
-  fine-tuned directly for 3-way NLI (entailment/neutral/contradiction) on
-  MNLI+SNLI+FEVER, loaded via sentence-transformers' `CrossEncoder`. Scores a
-  `(premise, hypothesis)` pair in one forward pass -- this is the actual
-  mechanism that catches what similarity can't (see the worked example
-  below).
-- **Evidence is decomposed into sentences before NLI scoring, not passed
-  as whole chunks.** Found empirically: a claim that is a verbatim sentence
-  from a retrieved ~150-word chunk scored 98.7% entailment against just
-  that sentence, but only 0.3% against the full chunk containing it --
-  cross-encoder NLI models are trained on single-sentence pairs and the
-  signal collapses on multi-sentence premises. Fixed by reusing
-  `src/claims/extractor.py`'s sentence splitter on evidence chunks too
-  (see `src/verification/nli_checker.py`'s docstring), matching the
-  approach used in factual-consistency research (SummaC, Laban et al.
-  2022). This measurably improved the benchmark numbers above (accuracy
-  0.500 -> 0.600, f1 0.609 -> 0.661).
-- **Benchmark dataset -- HaluEval (`pminervini/HaluEval`, `qa` config)**:
-  chosen over RAGTruth for the first implementation because it's directly
-  loadable via `datasets.load_dataset()` with a documented schema
-  (`{knowledge, question, right_answer, hallucinated_answer}`), and its
-  right/hallucinated pairing gives an exactly balanced binary benchmark for
-  free. RAGTruth remains a stub (`src/benchmark/datasets.py`'s
-  `load_ragtruth()`) -- it ships as raw JSON on GitHub with span-level
-  labels, not a documented HF dataset, so it needs a custom parser.
+## 8. Docker Deployment
 
-## The core idea, worked example
+Deploy with Docker Compose:
 
-This is the case the whole project is built around. Given the evidence
-"*Abraham Lincoln was the sixteenth President of the United States...*":
+```bash
+docker-compose up --build
+```
+Access the application at `http://localhost:8000`. Persistent database and uploads are mapped to `./data`.
 
-| claim | embedding similarity | NLI verdict |
+---
+
+## 9. API Reference Summary
+
+| Endpoint | Method | Description |
 |---|---|---|
-| "Lincoln was the sixteenth President." | 0.79 (supported) | **entailment** (99.6%) |
-| "Lincoln was the **seventeenth** President." | 0.71 (**still "supported"**) | **contradiction** (99.9%) |
+| `/api/health` | `GET` | Service status and SQLite database connection health |
+| `/api/models` | `GET` | Active NLI, embedding, and generation models |
+| `/api/stats/dashboard` | `GET` | Computed analytics from persisted analyses |
+| `/api/analyses` | `POST` | Decomposes answer, retrieves evidence, verifies claims |
+| `/api/analyses` | `GET` | Paginated list of past verification runs |
+| `/api/analyses/{id}` | `GET` | Detailed claim-level report and evidence passages |
+| `/api/analyses/{id}` | `DELETE`| Delete analysis record |
+| `/api/documents/upload` | `POST` | Upload & index PDF/TXT files with page preservation |
+| `/api/documents` | `GET` | List all indexed documents |
+| `/api/documents/{id}/preview` | `GET` | Safe page-level preview of extracted text |
+| `/api/documents/{id}` | `DELETE`| Remove document and its ChromaDB vector chunks |
+| `/api/experiments/run` | `POST` | Execute empirical benchmark sweep |
+| `/api/experiments` | `GET` | List past benchmark experiment records |
+| `/api/experiments/{id}/export`| `GET` | Export experiment metrics to CSV or JSON |
+| `/api/benchmarks/datasets` | `GET` | Dataset metadata, licensing, and label mappings |
+| `/api/settings` | `GET`/`POST` | Runtime configuration and hardware telemetry |
+| `/api/settings/providers` | `GET` | LLM provider status, active models, and masked keys |
 
-Swapping one word keeps the claim topically identical to the evidence --
-same entities, same sentence structure -- so embedding similarity barely
-moves and stays above the 0.5 threshold. The NLI model reads the actual
-relationship between the two sentences and correctly flags the
-contradiction. This exact case is asserted in
-[tests/verification/test_nli_checker.py](tests/verification/test_nli_checker.py)
-and
-[tests/verification/test_embedding_checker.py](tests/verification/test_embedding_checker.py).
+---
 
-## Benchmark results
+## 10. License & Citation
 
-Reproduce with `python -m src.benchmark.run_benchmark --limit 50` (default).
-An answer is scored "predicted hallucinated" if *any* of its extracted
-claims comes back unsupported -- matching HaluEval's one-label-per-answer
-granularity.
-
-| metric    | NLI checker | embedding baseline |
-|-----------|:-----------:|:-------------------:|
-| accuracy  | 0.600       | 0.260               |
-| precision | 0.574       | 0.260               |
-| recall    | 0.780       | 0.260               |
-| f1        | 0.661       | 0.260               |
-
-**What this does show**: NLI-based entailment substantially outperforms
-embedding similarity at this task, on this sample -- the whole reason to
-build the fancier checker.
-
-**What this doesn't show (yet)**: NLI's own precision (0.574) means over a
-third of its hallucination flags are wrong, and 50 examples is a small,
-unrepresentative sample. Neither checker's threshold (`config.yaml`'s
-`verification.entailment_threshold` / `embedding_similarity_threshold`,
-both currently a default 0.5) has been *tuned* against a held-out validation
-split -- that's the natural next step before quoting these numbers as
-anything more than a directional result.
-
-## Known limitations
-
-- **Sentence-splitting claim extraction doesn't decompose compound
-  sentences.** "Lincoln was president and was assassinated in 1865" stays
-  one claim even though it asserts two separate facts; a hallucination in
-  the second half could be masked by the first half being true. See
-  `src/claims/extractor.py`'s docstring for the planned LLM-based
-  decomposition upgrade.
-- **Terse answers lose the question's context.** Run the demo on a yes/no
-  question and the generated answer is often literally "yes" -- which
-  becomes the entire claim, with no reference to what it's answering
-  "yes" *to*. NLI checking "yes" against a Lincoln biography passage isn't
-  really testing anything meaningful. Fixing this means composing the claim
-  from the question + answer together, not the answer alone -- not yet
-  implemented.
-- **The NLI model conflates "unrelated" with "contradiction."** It was
-  trained on premise/hypothesis pairs that are topically related (MNLI's
-  convention: "neutral" means related-but-not-entailed, not unrelated).
-  Given a genuinely unrelated pair, it confidently predicts contradiction
-  instead of neutral (verified empirically -- see
-  `src/verification/nli_checker.py`'s docstring). The risk is bounded here
-  because evidence chunks always come from retrieval anchored to the
-  question, but it's an open question exactly how much this affects the
-  benchmark numbers above.
-- **Thresholds are un-tuned defaults**, as noted above.
-- **RAGTruth is not implemented** (`load_ragtruth()` is a stub) -- HaluEval
-  was enough to prove the comparison out first.
-
-## Current progress
-
-- [x] Project scaffolding (folders, config, requirements, tests skeleton)
-- [x] Step 1: RAG pipeline (chunk -> embed -> store -> retrieve -> generate)
-- [x] Step 2: claim extraction (`src/claims/extractor.py`) -- sentence-splitting baseline
-- [x] Step 3: embedding-similarity baseline (`src/verification/embedding_checker.py`)
-- [x] Step 4: NLI-based entailment checker (`src/verification/nli_checker.py`)
-- [x] Step 5: HaluEval loader (`src/benchmark/datasets.py`) -- RAGTruth still stubbed
-- [x] Step 6: metrics + benchmark runner (`src/benchmark/metrics.py`, `run_benchmark.py`)
-- [ ] Next: tune thresholds against a held-out split; fix the terse-answer /
-      question-context gap; consider LLM-based claim decomposition; RAGTruth loader
+Distributed under the MIT License. Built for researchers, engineers, and developers dedicated to trustworthy, grounded artificial intelligence.

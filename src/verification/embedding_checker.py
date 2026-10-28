@@ -70,3 +70,60 @@ def check_claim_similarity(claim_text: str, evidence_chunks: list[dict]) -> Embe
         is_supported=best_score >= threshold,
         most_similar_chunk_id=evidence_chunks[best_idx]["chunk_id"],
     )
+
+
+def verify_claim_embedding(claim_text: str, evidence_chunks: list[dict]):
+    """Scores claim by embedding similarity, returning an AggregatedClaimResult.
+
+    Demonstrates baseline limitations: high similarity does NOT guarantee
+    factual correctness.
+    """
+    from src.verification.aggregation import AggregatedClaimResult, ClaimVerdict, EvidencePassageScore
+
+    res = check_claim_similarity(claim_text, evidence_chunks)
+    threshold = get_config()["verification"]["embedding_similarity_threshold"]
+
+    verdict = ClaimVerdict.SUPPORTED if res.is_supported else ClaimVerdict.INSUFFICIENT_EVIDENCE
+
+    best_chunk = None
+    if res.most_similar_chunk_id and evidence_chunks:
+        best_chunk = next((c for c in evidence_chunks if c.get("chunk_id") == res.most_similar_chunk_id), evidence_chunks[0])
+
+    passage = None
+    if best_chunk:
+        passage = EvidencePassageScore(
+            chunk_id=best_chunk.get("chunk_id", "c0"),
+            doc_id=best_chunk.get("doc_id", "doc"),
+            text=best_chunk.get("text", ""),
+            page_number=best_chunk.get("page_number"),
+            retrieval_similarity=res.max_similarity,
+            entailment_prob=res.max_similarity,
+            contradiction_prob=0.0,
+            neutral_prob=1.0 - res.max_similarity,
+            verdict="entailment" if res.is_supported else "neutral",
+            is_winning=True,
+        )
+
+    explanation = (
+        f"Embedding similarity to closest chunk is {res.max_similarity:.1%}, which clears the threshold ({threshold:.1%}). "
+        "Caution: Embedding similarity measures topical relatedness rather than factual entailment."
+        if res.is_supported
+        else f"Maximum embedding similarity ({res.max_similarity:.1%}) fails the threshold ({threshold:.1%})."
+    )
+
+    return AggregatedClaimResult(
+        claim_text=claim_text,
+        verdict=verdict,
+        model_score=res.max_similarity,
+        retrieval_similarity=res.max_similarity,
+        verification_method="embedding",
+        model_identifier=get_config()["embedding"]["model_name"],
+        supporting_evidence=[passage] if passage else [],
+        primary_passage=passage,
+        plain_english_explanation=explanation,
+        requires_human_review=not res.is_supported,
+        limitations=[
+            "Embedding similarity baseline cannot detect factual contradiction when entities and vocabulary match."
+        ],
+    )
+

@@ -44,6 +44,22 @@ generation:
   max_new_tokens: 200
   openai_model_name: "gpt-4o-mini"
 
+gemini:
+  # Official Google GenAI SDK configuration
+  default_model: "gemini-2.5-flash"
+  timeout_seconds: 15.0
+  max_retries: 3
+  temperature: 0.1
+  structured_output: true
+
+hf_router:
+  # Hugging Face Router (OpenAI-compatible) endpoint
+  base_url: "https://router.huggingface.co/v1"
+  default_model: "deepseek-ai/DeepSeek-V4.1-Flash-1017:novita"
+  timeout_seconds: 20.0
+  max_retries: 3
+  temperature: 0.1
+
 verification:
   # NLI cross-encoder: scores a (premise, hypothesis) pair directly as
   # entailment/neutral/contradiction probabilities, rather than needing a
@@ -62,6 +78,20 @@ verification:
   # same embedding model as retrieval (src/rag/embedding.py).
   embedding_similarity_threshold: 0.5
 
+  # Adaptive verification parameters
+  # Fast embedding pre-filter: if similarity > adaptive_high_threshold, marked supported without NLI.
+  # If similarity < adaptive_low_threshold, marked insufficient evidence without NLI.
+  # Only ambiguous claims (between low and high thresholds) trigger the heavy NLI cross-encoder.
+  adaptive_high_threshold: 0.78
+  adaptive_low_threshold: 0.35
+  conflict_resolution_policy: "highest_confidence"  # "highest_confidence" | "strict_contradiction" | "conservative_abstain"
+
+documents:
+  max_upload_size_mb: 25
+  supported_extensions: [".pdf", ".txt"]
+  chunk_size_words: 150
+  chunk_overlap_words: 30
+
 benchmark:
   # Row limit for src/benchmark/run_benchmark.py's default run, i.e. how
   # many HaluEval source rows to score (each yields 2 BenchmarkExamples:
@@ -73,3 +103,5 @@ benchmark:
 paths:
   data_dir: "data"
   raw_corpus_cache: "data/corpus_cache"
+  database_path: "data/veriai.db"
+  uploads_dir: "data/uploads"

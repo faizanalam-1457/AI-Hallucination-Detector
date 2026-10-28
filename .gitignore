@@ -16,6 +16,15 @@ env/
 
 # --- Environment / secrets ---
 .env
+.env.local
+.env.*.local
+.env.*
+*.env
+frontend/.env
+frontend/.env.local
+frontend/.env.*
+!.env.example
+!frontend/.env.example
 
 # --- Data & model artifacts (regenerable, kept out of git) ---
 data/
@@ -37,3 +46,8 @@ results/
 .idea/
 .vscode/
 *.swp
+
+# --- Frontend ---
+frontend/node_modules/
+frontend/.vite/
+
